@@ -92,10 +92,19 @@ def captureTestImage(width, height):
 # Save a full size image to disk
 def saveImage(width, height, quality, diskSpaceToReserve):
     #keepDiskSpaceFree(diskSpaceToReserve)
-    time = datetime.now()
-    filename = filepath + "/%s-%04d%02d%02d-%02d_%02d_%02d%1d.jpg" % (filenamePrefix(), time.year, time.month, time.day, time.hour, time.minute, time.second, time.microsecond/100000)
-    theCamera.capture(filename, format='jpeg', use_video_port=True)
-    os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
+    now = datetime.now()
+    if motionDetected:
+      start = time.time()
+      filename = filepath + "/%s-%04d%02d%02d-%02d_%02d_%02d%s.jpg" % (filenamePrefix(), now.year, now.month, now.day, now.hour, now.minute, now.second, "%s")
+      camera.capture_sequence((
+        filename % i
+        for i in range(10)
+        ), use_video_port=True) # 3fps vs 0.5fps in non-video mode
+      print('Captured 10 images at %.2ffps' % (10 / (time.time() - start)))
+    else:
+      filename = filepath + "/%s-%04d%02d%02d-%02d_%02d_%02d%1d.jpg" % (filenamePrefix(), now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond/100000)
+      theCamera.capture(filename, format='jpeg', use_video_port=True)
+      os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
     print "\nCaptured %s" % filename
     
 # Keep free space above given level
