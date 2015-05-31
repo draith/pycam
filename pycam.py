@@ -69,14 +69,7 @@ testBorders = [ [[1,testWidth],[23,47]] ]  # [ [[start pixel on left side,end pi
 # debug mode should only be turned on while testing the parameters above
 debugMode = True
 testImageCaptures = 0
-motionDetected = False
 
-def filenamePrefix():
-  if (motionDetected):
-    return 'motion'
-  else:
-    return 'forced'
-    
 # Capture a small test image (for motion detection)
 def captureTestImage(width, height):
   global testImageCaptures
@@ -88,43 +81,25 @@ def captureTestImage(width, height):
   buffer = im.load()
   imageData.close()
   return im, buffer
-
-# Save a full size image to disk
-def saveImage(width, height, quality, diskSpaceToReserve):
-    #keepDiskSpaceFree(diskSpaceToReserve)
-    now = datetime.now()
-    if motionDetected:
-      start = time.time()
-      filename = filepath + "/%s-%04d%02d%02d-%02d_%02d_%02d%s.jpg" % (filenamePrefix(), now.year, now.month, now.day, now.hour, now.minute, now.second, "%s")
-      camera.capture_sequence((
-        filename % i
-        for i in range(10)
-        ), use_video_port=True) # 3fps vs 0.5fps in non-video mode
-      print('Captured 10 images at %.2ffps' % (10 / (time.time() - start)))
-    else:
-      filename = filepath + "/%s-%04d%02d%02d-%02d_%02d_%02d%1d.jpg" % (filenamePrefix(), now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond/100000)
-      theCamera.capture(filename, format='jpeg', use_video_port=True)
-      os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
-    print "\nCaptured %s" % filename
     
-# Keep free space above given level
-def keepDiskSpaceFree(bytesToReserve):
-    if (getFreeSpace() < bytesToReserve):
-        for filename in sorted(os.listdir(filepath + "/")):
-            if filename.startswith(filenamePrefix) and filename.endswith(".jpg"):
-                os.remove(filepath + "/" + filename)
-                print "Deleted %s/%s to avoid filling disk" % (filepath,filename)
-                if (getFreeSpace() > bytesToReserve):
-                    return
-
 # Get available disk space
 def getFreeSpace():
     st = os.statvfs(filepath + "/")
     du = st.f_bavail * st.f_frsize
     return du
 
+# Keep free space above given level
+def keepDiskSpaceFree(bytesToReserve):
+    if (getFreeSpace() < bytesToReserve):
+        for filename in sorted(os.listdir(filepath + "/")):
+            if filename.startswith(filenamePrefix) and filename.endswith(".h264"):
+                os.remove(filepath + "/" + filename)
+                print "Deleted %s/%s to avoid filling disk" % (filepath,filename)
+                if (getFreeSpace() > bytesToReserve):
+                    return
+
 # Start FTP sender
-# os.system('/home/pi/camera/ftper.sh &');
+os.system('/home/pi/camera/ftper.sh &');
 
 # Reset last capture time
 lastCapture = 0
@@ -144,29 +119,26 @@ with picamera.PiCamera() as camera:
     image1, buffer1 = captureTestImage(testWidth, testHeight)
     
     while (True):
-
       # Get comparison image
       image2, buffer2 = captureTestImage(testWidth, testHeight)
 
       # Count changed pixels
       changedPixels = 0
-      takePicture = False
-      motionDetected = False
       totalPixels = 0
       totalLevel = 0
       
-
-      if (debugMode): # in debug mode, save a bitmap-file with marked changed pixels and with visible testarea-borders
+      # in debug mode, save a bitmap-file with marked changed pixels and with visible testarea-borders
+      if (debugMode): 
           debugimage = Image.new("RGB",(testWidth, testHeight))
           debugim = debugimage.load()
 
-      for z in xrange(0, testAreaCount): # = xrange(0,1) with default-values = z will only have the value of 0 = only one scan-area = whole picture
-          for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]): # = xrange(0,100) with default-values
-              for y in xrange(testBorders[z][1][0]-1, testBorders[z][1][1]):   # = xrange(0,75) with default-values; testBorders are NOT zero-based, buffer1[x,y] are zero-based (0,0 is top left of image, testWidth-1,testHeight-1 is botton right)
+      # Scan test areas for changed pixels (motion) and mean light level.
+      for z in xrange(0, testAreaCount): 
+          for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]): 
+              for y in xrange(testBorders[z][1][0]-1, testBorders[z][1][1]):
                   if (debugMode):
                       debugim[x,y] = buffer2[x,y]
                       if ((x == testBorders[z][0][0]-1) or (x == testBorders[z][0][1]-1) or (y == testBorders[z][1][0]-1) or (y == testBorders[z][1][1]-1)):
-                          # print "Border %s %s" % (x,y)
                           debugim[x,y] = (0, 0, 255) # in debug mode, mark all border pixel to blue
                   
                   # Monitor exposure level
@@ -182,44 +154,55 @@ with picamera.PiCamera() as camera:
                           r,g,b = debugim[x,y]
                           debugim[x,y] = (r, 255, b) # in debug mode, mark all changed pixel to green
 
-      # Check force capture
-      if forceCapture:
-        if time.time() - lastCapture > forceCaptureTime:
-          # Forcing capture..
-          print "Forcing capture..."
-          takePicture = True
-          lastCapture = time.time()
       # Check and adjust exposure level
       meanLevel = totalLevel / totalPixels
       if meanLevel > 100 and shutterSpeed > 8000:
         shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
         camera.shutter_speed = shutterSpeed
-        print "Exposure decreased to {}ms".format(shutterSpeed/1000)
+        print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
         testImageCaptures = 0
         image2, buffer2 = captureTestImage(testWidth, testHeight)
       elif meanLevel < 50 and shutterSpeed < 400000:
         shutterSpeed = min(shutterSpeed * 75 / meanLevel, 400000)
         camera.shutter_speed = shutterSpeed
-        print "Exposure increased to {}ms".format(shutterSpeed/1000)
-        print "Camera shutter speed = {}".format(camera.shutter_speed)
+        print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
         testImageCaptures = 0
         image2, buffer2 = captureTestImage(testWidth, testHeight)
-      elif (changedPixels > sensitivity and testImageCaptures > 3):
-        motionDetected = True
-        takePicture = True # will shoot the photo later
-        if (debugMode):
+      elif testImageCaptures > 3:
+        if changedPixels > sensitivity:
+          # Motion detected: Record video...
           now = datetime.now()
-          filename = filepath + "/debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
-          debugimage.save(filename) # save debug image as bmp
-          print "%s saved, %s changed pixels, captures = %s" % (filename, changedPixels, testImageCaptures)
-          print "Mean level = {}".format(meanLevel)
+          if (debugMode):
+            filename = filepath + "/debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
+            debugimage.save(filename) # save debug image as bmp
+            print "%s saved, %s changed pixels, captures = %s" % (filename, changedPixels, testImageCaptures)
           
-      if takePicture:
-          saveImage(saveWidth, saveHeight, saveQuality, diskSpaceToReserve)
-          if motionDetected and time.time() - lastEmail > sendMailInterval:
-              # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
-              os.system('/home/pi/pycam/mailer.sh')
-              lastEmail = time.time()
+          print('Motion detected: Recording video...................')
+          filename = filepath + "/motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+          theCamera.start_recording(filename)
+          theCamera.wait_recording(10)
+          theCamera.stop_recording()
+          print('Done!')
+          testImageCaptures = 2
+          if time.time() - lastEmail > sendMailInterval:
+            # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
+            os.system('/home/pi/pycam/mailer.sh')
+            lastEmail = time.time()
+          os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
+            
+          keepDiskSpaceFree(diskSpaceToReserve)
+
+        # Check force capture
+        elif forceCapture:
+          if time.time() - lastCapture > forceCaptureTime:
+            # Forcing capture..
+            print "Forcing capture..."
+            now = datetime.now()
+            filename = filepath + "/forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+            theCamera.capture(filename, format='jpeg', use_video_port=True)
+            os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
+            print "\nCaptured %s" % filename
+            lastCapture = time.time()
 
       # Shift comparison buffers
       image1, buffer1 = image2, buffer2
