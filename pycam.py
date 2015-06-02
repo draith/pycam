@@ -29,7 +29,8 @@ sensitivity = 20
 forceCapture = True
 forceCaptureTime = 60 * 60 # Once an hour
 sendMailInterval = 60 * 60 # Once an hour
-filepath = "/home/pi/usbdrv"
+rampath = "/var/ram/"
+filepath = "/home/pi/usbdrv/"
 #filenamePrefix = "motion"
 diskSpaceToReserve = 100 * 1024 * 1024 # Keep 100 mb free on disk
 theCamera = False
@@ -45,7 +46,7 @@ testHeight = 73
 
 # this is the default setting, if the whole image should be scanned for changed pixel
 testAreaCount = 1
-testBorders = [ [[1,testWidth],[23,47]] ]  # [ [[start pixel on left side,end pixel on right side],[start pixel on top side,stop pixel on bottom side]] ]
+testBorders = [ [[1,testWidth],[16,40]] ]  # [ [[start pixel on left side,end pixel on right side],[start pixel on top side,stop pixel on bottom side]] ]
 # testBorders are NOT zero-based, the first pixel is 1 and the last pixel is testWith or testHeight
 
 # with "testBorders", you can define areas, where the script should scan for changed pixel
@@ -84,26 +85,30 @@ def captureTestImage(width, height):
     
 # Get available disk space
 def getFreeSpace():
-    st = os.statvfs(filepath + "/")
+    st = os.statvfs(filepath)
     du = st.f_bavail * st.f_frsize
     return du
 
 # Keep free space above given level
 def keepDiskSpaceFree(bytesToReserve):
     if (getFreeSpace() < bytesToReserve):
-        for filename in sorted(os.listdir(filepath + "/")):
+        for filename in sorted(os.listdir(filepath)):
             if filename.startswith(filenamePrefix) and filename.endswith(".h264"):
-                os.remove(filepath + "/" + filename)
-                print "Deleted %s/%s to avoid filling disk" % (filepath,filename)
+                os.remove(filepath + filename)
+                print "Deleted %s%s to avoid filling disk" % (filepath,filename)
                 if (getFreeSpace() > bytesToReserve):
                     return
 
+# Start MP4 converter
+os.system('/home/pi/pycam/converter.sh > /dev/null &');
 # Start FTP sender
-os.system('/home/pi/camera/ftper.sh &');
+os.system('/home/pi/camera/ftper.sh 2> /dev/null &');
 
 # Reset last capture time
 lastCapture = 0
 lastEmail = 0
+# Initialize exposure variation monitoring
+meanLevel = 75
 
 with picamera.PiCamera() as camera:
     theCamera = camera
@@ -155,6 +160,7 @@ with picamera.PiCamera() as camera:
                           debugim[x,y] = (r, 255, b) # in debug mode, mark all changed pixel to green
 
       # Check and adjust exposure level
+      lastMean = meanLevel
       meanLevel = totalLevel / totalPixels
       if meanLevel > 100 and shutterSpeed > 8000:
         shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
@@ -169,28 +175,30 @@ with picamera.PiCamera() as camera:
         testImageCaptures = 0
         image2, buffer2 = captureTestImage(testWidth, testHeight)
       elif testImageCaptures > 3:
-        if changedPixels > sensitivity:
+        if changedPixels > sensitivity and changedPixels < 1000:
           # Motion detected: Record video...
           now = datetime.now()
           if (debugMode):
-            filename = filepath + "/debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
+            filename = filepath + "debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
             debugimage.save(filename) # save debug image as bmp
             print "%s saved, %s changed pixels, captures = %s" % (filename, changedPixels, testImageCaptures)
-          
-          print('Motion detected: Recording video...................')
-          filename = filepath + "/motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-          theCamera.start_recording(filename)
-          theCamera.wait_recording(10)
-          theCamera.stop_recording()
-          print('Done!')
-          testImageCaptures = 2
-          if time.time() - lastEmail > sendMailInterval:
-            # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
-            os.system('/home/pi/pycam/mailer.sh')
-            lastEmail = time.time()
-          os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
-            
-          keepDiskSpaceFree(diskSpaceToReserve)
+            print "Change in mean level = %d" % (meanLevel - lastMean)
+          # Prevent light level changes from triggering motion detection..
+          if abs(meanLevel - lastMean) < (threshold / 2):
+            print('Motion detected: Recording video...................')
+            filename = rampath + "motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+            theCamera.start_recording(filename, format='h264', quality=20)
+            theCamera.wait_recording(10)
+            theCamera.stop_recording()
+            print('Done!')
+            testImageCaptures = 2
+            if time.time() - lastEmail > sendMailInterval:
+              # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
+              os.system('/home/pi/pycam/mailer.sh')
+              lastEmail = time.time()
+            os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
+              
+            keepDiskSpaceFree(diskSpaceToReserve)
 
         # Check force capture
         elif forceCapture:
@@ -198,7 +206,7 @@ with picamera.PiCamera() as camera:
             # Forcing capture..
             print "Forcing capture..."
             now = datetime.now()
-            filename = filepath + "/forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+            filename = filepath + "forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
             theCamera.capture(filename, format='jpeg', use_video_port=True)
             os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
             print "\nCaptured %s" % filename
