@@ -8,13 +8,11 @@
 
 # import StringIO
 import io
-import subprocess
 import os
 import time
 from datetime import datetime
 from PIL import Image
 import picamera
-from fractions import Fraction
 
 # Motion detection settings:
 # Threshold          - how much a pixel has to change by to be marked as "changed"
@@ -25,7 +23,7 @@ from fractions import Fraction
 # diskSpaceToReserve - Delete oldest images to avoid filling disk. How much byte to keep free on disk.
 # cameraSettings     - "" = no extra settings; "-hf" = Set horizontal flip of image; "-vf" = Set vertical flip; "-hf -vf" = both horizontal and vertical flip
 threshold = 10
-sensitivity = 20
+sensitivity = 100
 forceCapture = True
 forceCaptureTime = 60 * 60 # Once an hour
 sendMailInterval = 60 * 60 # Once an hour
@@ -34,6 +32,7 @@ filepath = "/home/pi/usbdrv/"
 #filenamePrefix = "motion"
 diskSpaceToReserve = 100 * 1024 * 1024 # Keep 100 mb free on disk
 theCamera = False
+movieJustTaken = False
 
 # settings of the photos to save
 saveWidth   = 1296
@@ -69,14 +68,11 @@ testBorders = [ [[1,testWidth],[16,40]] ]  # [ [[start pixel on left side,end pi
 # in debug mode, a file debug.bmp is written to disk with marked changed pixel an with marked border of scan-area
 # debug mode should only be turned on while testing the parameters above
 debugMode = True
-testImageCaptures = 0
 
 # Capture a small test image (for motion detection)
 def captureTestImage(width, height):
-  global testImageCaptures
   imageData = io.BytesIO()
   theCamera.capture(imageData, format='jpeg', use_video_port=True, resize=(width, height))
-  testImageCaptures += 1
   imageData.seek(0)
   im = Image.open(imageData)
   buffer = im.load()
@@ -166,51 +162,52 @@ with picamera.PiCamera() as camera:
         shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
         camera.shutter_speed = shutterSpeed
         print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-        testImageCaptures = 0
         image2, buffer2 = captureTestImage(testWidth, testHeight)
       elif meanLevel < 50 and shutterSpeed < 400000:
         shutterSpeed = min(shutterSpeed * 75 / meanLevel, 400000)
         camera.shutter_speed = shutterSpeed
         print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-        testImageCaptures = 0
         image2, buffer2 = captureTestImage(testWidth, testHeight)
-      elif testImageCaptures > 3:
-        if changedPixels > sensitivity and changedPixels < 1000:
-          # Motion detected: Record video...
-          now = datetime.now()
-          if (debugMode):
-            filename = filepath + "debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
-            debugimage.save(filename) # save debug image as bmp
-            print "%s saved, %s changed pixels, captures = %s" % (filename, changedPixels, testImageCaptures)
-            print "Change in mean level = %d" % (meanLevel - lastMean)
-          # Prevent light level changes from triggering motion detection..
-          if abs(meanLevel - lastMean) < (threshold / 2):
-            print('Motion detected: Recording video...................')
-            filename = rampath + "motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-            theCamera.start_recording(filename, format='h264', quality=20)
-            theCamera.wait_recording(10)
-            theCamera.stop_recording()
-            print('Done!')
-            testImageCaptures = 2
-            if time.time() - lastEmail > sendMailInterval:
-              # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
-              os.system('/home/pi/pycam/mailer.sh')
-              lastEmail = time.time()
-            os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
-              
-            keepDiskSpaceFree(diskSpaceToReserve)
+      elif movieJustTaken:
+        # Make sure we have two captures to compare after the movie
+        movieJustTaken = False
+      elif changedPixels > sensitivity:
+        # Motion detected: Record video...
+        now = datetime.now()
+        if (debugMode):
+          filename = filepath + "debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
+          debugimage.save(filename) # save debug image as bmp
+          print "%s saved, %s changed pixels" % (filename, changedPixels)
+          print "Change in mean level = %d" % (meanLevel - lastMean)
+        # Prevent light level changes from triggering motion detection..
+        if abs(meanLevel - lastMean) < (threshold / 2):
+          print('Motion detected: Recording video...................')
+          filename = rampath + "motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+          theCamera.start_recording(filename, format='h264', quality=20)
+          theCamera.wait_recording(10)
+          theCamera.stop_recording()
+          print('Done!')
+          if time.time() - lastEmail > sendMailInterval:
+            # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
+            os.system('/home/pi/pycam/mailer.sh')
+            lastEmail = time.time()
+          os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
+            
+          keepDiskSpaceFree(diskSpaceToReserve)
+          movieJustTaken = True
 
-        # Check force capture
-        elif forceCapture:
-          if time.time() - lastCapture > forceCaptureTime:
-            # Forcing capture..
-            print "Forcing capture..."
-            now = datetime.now()
-            filename = filepath + "forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-            theCamera.capture(filename, format='jpeg', use_video_port=True)
-            os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
-            print "\nCaptured %s" % filename
-            lastCapture = time.time()
+      # Check force capture
+      elif forceCapture:
+        if time.time() - lastCapture > forceCaptureTime:
+          # Forcing capture..
+          print "Forcing capture..."
+          now = datetime.now()
+          #filename = filepath + "forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+          filename = filepath + "snapshot.jpg"
+          theCamera.capture(filename, format='jpeg', use_video_port=True)
+          os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
+          print "\nCaptured %s" % filename
+          lastCapture = time.time()
 
       # Shift comparison buffers
       image1, buffer1 = image2, buffer2
