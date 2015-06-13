@@ -3,7 +3,8 @@ var http = require("http");
 var fs = require("fs");
 var child_process = require('child_process');
 var exec = child_process.exec;
-var lastNumber = parseInt(fs.readFileSync('lastNum.txt','utf8'),10);
+var path = "/home/pi/pycam/";
+var lastNumber = parseInt(fs.readFileSync(path + 'lastNum.txt','utf8'),10);
 
 function onRequest(request, response)
 {
@@ -20,18 +21,19 @@ function onRequest(request, response)
 			response.end();
 		});
 	}
-
 	// First, decrypt the encrypted command encoded in the url path
-	exec("./decrypt.sh " + request.url.substring(1), { timeout : 200 },
+	var scriptcmd = path + "decrypt.sh " + request.url.substring(1);
+	exec(scriptcmd, { timeout : 200 },
 	function (error, stdout, stderr) {
 		// Decrypted command should consist of <command>/<number>
-		var components = stdout.split('/');
+		var command = fs.readFileSync(path + 'plaintext','utf8');
+		var components = command.split('/');
 		if (components.length == 2)
 		{
 			// Check that number > last number : prevent repeat attacks
-			console.log('command = ' + components[0]);
+			// console.log('command = ' + components[0]);
 			var newNumber = parseInt(components[1],10);
-			console.log('newNumber = ' + newNumber);
+			// console.log('newNumber = ' + newNumber);
 			if (newNumber <= lastNumber)
 			{
 				console.log('newNumber is not greater than lastNumber ' + lastNumber);
@@ -43,7 +45,7 @@ function onRequest(request, response)
 				if (command == "Switch")
 				{
 					// Save new number
-					fs.writeFileSync("lastNum.txt", newNumber.toString());
+					fs.writeFileSync(path + "lastNum.txt", newNumber.toString());
 					exec("pgrep pycam.py", { timeout : 500 }, 
 					function (error, stdout, sterr) {
 						var running = (stdout != '');
@@ -57,7 +59,7 @@ function onRequest(request, response)
 				else if (command == "Status")
 				{
 					// Save new number
-					fs.writeFileSync("lastNum.txt", newNumber.toString());
+					fs.writeFileSync(path + "lastNum.txt", newNumber.toString());
 					// Just display the current state.
 					showPage();
 				}
