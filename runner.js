@@ -1,4 +1,4 @@
-// Runner: receive requests to run or stop pycam.
+// Runner: receive requests to run or stop pycam, and show current status.
 var http = require("http");
 var fs = require("fs");
 var child_process = require('child_process');
@@ -10,7 +10,7 @@ var key = new NodeRSA(fs.readFileSync(path + 'key.pem','utf8'));
 function onRequest(request, response)
 {
 	// Display current status - running if pgrep returns non-empty string
-	function showPage(error, stdout, sterr)
+	function showStatus(error, stdout, sterr)
 	{
 	exec("pgrep pycam.py", { timeout : 500 }, 
 		function (error, stdout, sterr) {
@@ -24,40 +24,47 @@ function onRequest(request, response)
 	}
 	// First, decrypt the encrypted command encoded in the url path
 	var encrypted = request.url.substring(1);
-	var decrypted = key.decrypt(encrypted, 'utf8');
-	// Then split into command and number
-	var components = decrypted.split('/');
-	if (components.length == 2)
+	try 
 	{
-		command = components[0];
-		if (command == "Status" || command == "Switch")
+		var decrypted = key.decrypt(encrypted, 'utf8');
+		// Then split into command and number
+		var components = decrypted.split('/');
+		if (components.length == 2)
 		{
-			var newNumber = parseInt(components[1],10);
-			// Check that newNumber > lastNumber : prevent repeat attacks
-			if (command == "Switch" && newNumber > lastNumber)
+			command = components[0];
+			if (command == "Status" || command == "Switch")
 			{
-				exec("pgrep pycam.py", { timeout : 500 }, 
-				function (error, stdout, sterr) {
-					var running = (stdout != '');
-					// Start or Stop before displaying the updated state.
-					command = "sudo /etc/init.d/pycam " + (running ? 'stop' : 'start');
-					exec(command, { timeout: 500 },
-						showPage
-						);
-				});
-			}
-			else
-			{
-				// Just display the current state.
-				showPage();
-			}
-			if (newNumber > lastNumber)
-			{
-				// Save new number
-				fs.writeFileSync(path + "lastNum.txt", newNumber.toString());
-				lastNumber = newNumber;
+				var newNumber = parseInt(components[1],10);
+				// Check that newNumber > lastNumber : prevent repeat attacks
+				if (command == "Switch" && newNumber > lastNumber)
+				{
+					exec("pgrep pycam.py", { timeout : 500 }, 
+					function (error, stdout, sterr) {
+						var running = (stdout != '');
+						// Start or Stop before displaying the updated state.
+						command = "sudo /etc/init.d/pycam " + (running ? 'stop' : 'start');
+						exec(command, { timeout: 1000 }, showStatus);
+					});
+				}
+				else
+				{
+					// Just display the current state.
+					showStatus();
+				}
+				if (newNumber > lastNumber)
+				{
+					// Save new number
+					fs.writeFileSync(path + "lastNum.txt", newNumber.toString());
+					lastNumber = newNumber;
+				}
 			}
 		}
+	}
+	catch (err)
+	{
+		// key.decrypt will throw an error if an invalid command string is received.
+		// Catch this to protect us from DoS attacks.
+		console.log("Caught error: " + err.message);
 	}
 } // onRequest
 

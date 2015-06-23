@@ -31,7 +31,7 @@ rampath = "/var/ram/"
 filepath = "/home/pi/usbdrv/"
 #filenamePrefix = "motion"
 diskSpaceToReserve = 100 * 1024 * 1024 # Keep 100 mb free on disk
-theCamera = False
+camera = False
 movieJustTaken = False
 
 # settings of the photos to save
@@ -72,7 +72,7 @@ debugMode = True
 # Capture a small test image (for motion detection)
 def captureTestImage(width, height):
   imageData = io.BytesIO()
-  theCamera.capture(imageData, format='jpeg', use_video_port=True, resize=(width, height))
+  camera.capture(imageData, format='jpeg', use_video_port=True, resize=(width, height))
   imageData.seek(0)
   im = Image.open(imageData)
   buffer = im.load()
@@ -104,110 +104,114 @@ os.system('/home/pi/camera/ftper.sh 2> /dev/null &');
 lastCapture = 0
 lastEmail = 0
 # Initialize exposure variation monitoring
-meanLevel = 75
+meanLevel = 0
 
-with picamera.PiCamera() as camera:
-    theCamera = camera
-    # Set up the camera...
-    camera.resolution = (1296, 730)
-    camera.awb_mode = 'off'
-    camera.awb_gains = (1.5, 1.2)
-    camera.exposure_mode = 'sports'
-    camera.framerate = 2
-    camera.shutter_speed = shutterSpeed
+camera = picamera.PiCamera()
+try:
+  # Set up the camera...
+  camera.resolution = (1296, 730)
+  camera.awb_mode = 'off'
+  camera.awb_gains = (1.5, 1.2)
+  camera.exposure_mode = 'sports'
+  camera.framerate = 2
+  camera.shutter_speed = shutterSpeed
+  
+  # Get first image
+  image1, buffer1 = captureTestImage(testWidth, testHeight)
+  
+  while (True):
+    # Get comparison image
+    image2, buffer2 = captureTestImage(testWidth, testHeight)
+
+    # Count changed pixels
+    changedPixels = 0
+    totalPixels = 0
+    totalLevel = 0
     
-    # Get first image
-    image1, buffer1 = captureTestImage(testWidth, testHeight)
-    
-    while (True):
-      # Get comparison image
+    # in debug mode, save a bitmap-file with marked changed pixels and with visible testarea-borders
+    if (debugMode): 
+        debugimage = Image.new("RGB",(testWidth, testHeight))
+        debugim = debugimage.load()
+
+    # Scan test areas for changed pixels (motion) and mean light level.
+    for z in xrange(0, testAreaCount): 
+        for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]): 
+            for y in xrange(testBorders[z][1][0]-1, testBorders[z][1][1]):
+                if (debugMode):
+                    debugim[x,y] = buffer2[x,y]
+                    if ((x == testBorders[z][0][0]-1) or (x == testBorders[z][0][1]-1) or (y == testBorders[z][1][0]-1) or (y == testBorders[z][1][1]-1)):
+                        debugim[x,y] = (0, 0, 255) # in debug mode, mark all border pixel to blue
+                
+                # Monitor exposure level
+                totalPixels += 1
+                totalLevel += buffer2[x,y][1]
+                
+                # Just check green channel as it's the highest quality channel
+                pixdiff = abs(buffer1[x,y][1] - buffer2[x,y][1])
+                
+                if pixdiff > threshold:
+                    changedPixels += 1
+                    if (debugMode):
+                        r,g,b = debugim[x,y]
+                        debugim[x,y] = (r, 255, b) # in debug mode, mark all changed pixel to green
+
+    # Check and adjust exposure level
+    lastMean = meanLevel
+    meanLevel = totalLevel / totalPixels
+    if meanLevel > 100 and shutterSpeed > 8000:
+      shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
+      camera.shutter_speed = shutterSpeed
+      print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
       image2, buffer2 = captureTestImage(testWidth, testHeight)
-
-      # Count changed pixels
-      changedPixels = 0
-      totalPixels = 0
-      totalLevel = 0
-      
-      # in debug mode, save a bitmap-file with marked changed pixels and with visible testarea-borders
-      if (debugMode): 
-          debugimage = Image.new("RGB",(testWidth, testHeight))
-          debugim = debugimage.load()
-
-      # Scan test areas for changed pixels (motion) and mean light level.
-      for z in xrange(0, testAreaCount): 
-          for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]): 
-              for y in xrange(testBorders[z][1][0]-1, testBorders[z][1][1]):
-                  if (debugMode):
-                      debugim[x,y] = buffer2[x,y]
-                      if ((x == testBorders[z][0][0]-1) or (x == testBorders[z][0][1]-1) or (y == testBorders[z][1][0]-1) or (y == testBorders[z][1][1]-1)):
-                          debugim[x,y] = (0, 0, 255) # in debug mode, mark all border pixel to blue
-                  
-                  # Monitor exposure level
-                  totalPixels += 1
-                  totalLevel += buffer2[x,y][1]
-                  
-                  # Just check green channel as it's the highest quality channel
-                  pixdiff = abs(buffer1[x,y][1] - buffer2[x,y][1])
-                  
-                  if pixdiff > threshold:
-                      changedPixels += 1
-                      if (debugMode):
-                          r,g,b = debugim[x,y]
-                          debugim[x,y] = (r, 255, b) # in debug mode, mark all changed pixel to green
-
-      # Check and adjust exposure level
-      lastMean = meanLevel
-      meanLevel = totalLevel / totalPixels
-      if meanLevel > 100 and shutterSpeed > 8000:
-        shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
-        camera.shutter_speed = shutterSpeed
-        print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-        image2, buffer2 = captureTestImage(testWidth, testHeight)
-      elif meanLevel < 50 and shutterSpeed < 400000:
-        shutterSpeed = min(shutterSpeed * 75 / meanLevel, 400000)
-        camera.shutter_speed = shutterSpeed
-        print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-        image2, buffer2 = captureTestImage(testWidth, testHeight)
-      elif movieJustTaken:
-        # Make sure we have two captures to compare after the movie
-        movieJustTaken = False
-      elif changedPixels > sensitivity:
+    elif meanLevel < 50 and shutterSpeed < 400000:
+      shutterSpeed = min(shutterSpeed * 75 / meanLevel, 400000)
+      camera.shutter_speed = shutterSpeed
+      print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
+      image2, buffer2 = captureTestImage(testWidth, testHeight)
+    elif movieJustTaken:
+      # Make sure we have two captures to compare after the movie
+      movieJustTaken = False
+    elif changedPixels > sensitivity:
+      # Prevent light level changes from triggering motion detection..
+      if abs(meanLevel - lastMean) < (threshold / 2):
         # Motion detected: Record video...
         now = datetime.now()
         if (debugMode):
           filename = filepath + "debug-%02d_%02d_%02d.bmp" % (now.hour, now.minute, now.second)
           debugimage.save(filename) # save debug image as bmp
           print "%s saved, %s changed pixels" % (filename, changedPixels)
-          print "Change in mean level = %d" % (meanLevel - lastMean)
-        # Prevent light level changes from triggering motion detection..
-        if abs(meanLevel - lastMean) < (threshold / 2):
-          print('Motion detected: Recording video...................')
-          filename = rampath + "motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-          theCamera.start_recording(filename, format='h264', quality=20)
-          theCamera.wait_recording(10)
-          theCamera.stop_recording()
-          print('Done!')
-          if time.time() - lastEmail > sendMailInterval:
-            # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
-            os.system('/home/pi/pycam/mailer.sh')
-            lastEmail = time.time()
-          os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
-            
-          keepDiskSpaceFree(diskSpaceToReserve)
-          movieJustTaken = True
+        print('Motion detected: Recording video...................')
+        filename = rampath + "motion-%04d%02d%02d-%02d_%02d_%02d.h264" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+        camera.start_recording(filename, format='h264', quality=20)
+        camera.wait_recording(10)
+        camera.stop_recording()
+        print('Done!')
+        if time.time() - lastEmail > sendMailInterval:
+          # Send alert email (see http://iqjar.com/jar/sending-emails-from-the-raspberry-pi/)
+          os.system('/home/pi/pycam/mailer.sh')
+          lastEmail = time.time()
+        # Convert / encase in mp4, and upload.
+        os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
+          
+        keepDiskSpaceFree(diskSpaceToReserve)
+        movieJustTaken = True
 
-      # Check force capture
-      elif forceCapture:
-        if time.time() - lastCapture > forceCaptureTime:
-          # Forcing capture..
-          print "Forcing capture..."
-          now = datetime.now()
-          #filename = filepath + "forced-%04d%02d%02d-%02d_%02d_%02d.jpg" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
-          filename = filepath + "snapshot.jpg"
-          theCamera.capture(filename, format='jpeg', use_video_port=True)
-          os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
-          print "\nCaptured %s" % filename
-          lastCapture = time.time()
+    # Check force capture
+    elif forceCapture:
+      if time.time() - lastCapture > forceCaptureTime:
+        # Forcing capture..
+        print "Forcing capture..."
+        now = datetime.now()
+        filename = filepath + "snapshot.jpg"
+        camera.capture(filename, format='jpeg', use_video_port=True)
+        os.system("echo '{0}' >> /home/pi/camera/ftper.txt".format(filename))
+        print "\nCaptured %s" % filename
+        lastCapture = time.time()
 
-      # Shift comparison buffers
-      image1, buffer1 = image2, buffer2
+    # Shift comparison buffers
+    image1, buffer1 = image2, buffer2
+    
+finally:
+  print "Exiting..."
+  camera.close()
+ 
