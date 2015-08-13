@@ -19,7 +19,7 @@ function onRequest(request, response)
 			response.write(fs.readFileSync('runnertop.html'));
 			response.write(running ? "<h2 style='color:green;'> Running " :
 			                         "<h2 style='color:red;'> Stopped ");
-			response.end();
+			response.end("</h2></body></html>");
 		});
 	}
 	// First, decrypt the encrypted command encoded in the url path

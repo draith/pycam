@@ -31,7 +31,6 @@ rampath = "/var/ram/"
 filepath = "/home/pi/usbdrv/"
 #filenamePrefix = "motion"
 diskSpaceToReserve = 100 * 1024 * 1024 # Keep 100 mb free on disk
-camera = False
 movieJustTaken = False
 
 # settings of the photos to save
@@ -70,7 +69,7 @@ testBorders = [ [[1,testWidth],[16,40]] ]  # [ [[start pixel on left side,end pi
 debugMode = True
 
 # Capture a small test image (for motion detection)
-def captureTestImage(width, height):
+def captureTestImage(width, height, camera):
   imageData = io.BytesIO()
   camera.capture(imageData, format='jpeg', use_video_port=True, resize=(width, height))
   imageData.seek(0)
@@ -95,6 +94,9 @@ def keepDiskSpaceFree(bytesToReserve):
                 if (getFreeSpace() > bytesToReserve):
                     return
 
+now = datetime.now()
+print "Starting at %04d-%02d-%02d %02d:%02d:%02d" % (now.year, now.month, now.day, now.hour, now.minute, now.second)
+
 # Start MP4 converter
 os.system('/home/pi/pycam/converter.sh > /dev/null &');
 # Start FTP sender
@@ -106,8 +108,8 @@ lastEmail = 0
 # Initialize exposure variation monitoring
 meanLevel = 0
 
-camera = picamera.PiCamera()
-try:
+with picamera.PiCamera() as camera:
+
   # Set up the camera...
   camera.resolution = (1296, 730)
   camera.awb_mode = 'off'
@@ -117,11 +119,11 @@ try:
   camera.shutter_speed = shutterSpeed
   
   # Get first image
-  image1, buffer1 = captureTestImage(testWidth, testHeight)
+  image1, buffer1 = captureTestImage(testWidth, testHeight, camera)
   
   while (True):
     # Get comparison image
-    image2, buffer2 = captureTestImage(testWidth, testHeight)
+    image2, buffer2 = captureTestImage(testWidth, testHeight, camera)
 
     # Count changed pixels
     changedPixels = 0
@@ -162,12 +164,12 @@ try:
       shutterSpeed = max(shutterSpeed * 75 / meanLevel, 8000)
       camera.shutter_speed = shutterSpeed
       print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-      image2, buffer2 = captureTestImage(testWidth, testHeight)
+      image2, buffer2 = captureTestImage(testWidth, testHeight, camera)
     elif meanLevel < 50 and shutterSpeed < 400000:
       shutterSpeed = min(shutterSpeed * 75 / meanLevel, 400000)
       camera.shutter_speed = shutterSpeed
       print "Mean level {0}; Exposure decreased to {1}ms".format(meanLevel,shutterSpeed/1000)
-      image2, buffer2 = captureTestImage(testWidth, testHeight)
+      image2, buffer2 = captureTestImage(testWidth, testHeight, camera)
     elif movieJustTaken:
       # Make sure we have two captures to compare after the movie
       movieJustTaken = False
@@ -210,8 +212,4 @@ try:
 
     # Shift comparison buffers
     image1, buffer1 = image2, buffer2
-    
-finally:
-  print "Exiting..."
-  camera.close()
  
