@@ -66,7 +66,7 @@ testBorders = [ [[1,testWidth],[16,40]] ]  # [ [[start pixel on left side,end pi
 
 # in debug mode, a file debug.bmp is written to disk with marked changed pixel an with marked border of scan-area
 # debug mode should only be turned on while testing the parameters above
-debugMode = True
+debugMode = False
 
 # Capture a small test image (for motion detection)
 def captureTestImage(width, height, camera):
@@ -127,6 +127,7 @@ with picamera.PiCamera() as camera:
 
     # Count changed pixels
     changedPixels = 0
+    brighterPixels = 0
     totalPixels = 0
     totalLevel = 0
     
@@ -149,13 +150,18 @@ with picamera.PiCamera() as camera:
                 totalLevel += buffer2[x,y][1]
                 
                 # Just check green channel as it's the highest quality channel
-                pixdiff = abs(buffer1[x,y][1] - buffer2[x,y][1])
+                pixdiff = buffer1[x,y][1] - buffer2[x,y][1]
                 
-                if pixdiff > threshold:
+                if abs(pixdiff) > threshold:
                     changedPixels += 1
-                    if (debugMode):
+                    if pixdiff > 0:
+                      brighterPixels += 1
+                      if (debugMode):
                         r,g,b = debugim[x,y]
-                        debugim[x,y] = (r, 255, b) # in debug mode, mark all changed pixel to green
+                        debugim[x,y] = (r, 255, b) # in debug mode, mark all increased pixels green
+                    elif (debugMode):
+                        r,g,b = debugim[x,y]
+                        debugim[x,y] = (255, g, b) # in debug mode, mark all decreased pixels red
 
     # Check and adjust exposure level
     lastMean = meanLevel
@@ -175,7 +181,11 @@ with picamera.PiCamera() as camera:
       movieJustTaken = False
     elif changedPixels > sensitivity:
       # Prevent light level changes from triggering motion detection..
-      if abs(meanLevel - lastMean) < (threshold / 2):
+      if brighterPixels < changedPixels >> 2:
+        print "changedPixels = {0}, brighterPixels = {1} (too low)".format(changedPixels,brighterPixels)
+      elif changedPixels - brighterPixels < changedPixels >> 2:
+        print "changedPixels = {0}, brighterPixels = {1} (too high)".format(changedPixels,brighterPixels)
+      else:
         # Motion detected: Record video...
         now = datetime.now()
         if (debugMode):
