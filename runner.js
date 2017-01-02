@@ -9,17 +9,15 @@ var NodeRSA = require('node-rsa');
 var key = new NodeRSA(fs.readFileSync(path + 'key.pem','utf8'));
 function onRequest(request, response)
 {
+  console.log("Got request: " + request.url);
 	// Display current status - running if pgrep returns non-empty string
 	function showStatus(error, stdout, sterr)
 	{
-	exec("pgrep pycam.py", { timeout : 500 }, 
+	exec("pgrep pycam.py", { timeout : 500 },
 		function (error, stdout, sterr) {
 			var running = (stdout != '');
-			response.writeHead(200, {"Content-Type": "text/html"});
-			response.write(fs.readFileSync('runnertop.html'));
-			response.write(running ? "<h2 style='color:green;'> Running " :
-			                         "<h2 style='color:red;'> Stopped ");
-			response.end("</h2></body></html>");
+			response.writeHead(200, {"Content-Type": "text/plain"});
+			response.end(running ? "Running" : "Stopped");
 		});
 	}
 	// First, decrypt the encrypted command encoded in the url path
@@ -32,18 +30,19 @@ function onRequest(request, response)
 		if (components.length == 2)
 		{
 			command = components[0];
+      console.log("command = " + command);
 			if (command == "Status" || command == "Switch")
 			{
 				var newNumber = parseInt(components[1],10);
 				// Check that newNumber > lastNumber : prevent repeat attacks
-				if (command == "Switch" && newNumber > lastNumber)
+				if (command != "Status" && newNumber > lastNumber)
 				{
 					exec("pgrep pycam.py", { timeout : 500 }, 
 					function (error, stdout, sterr) {
-						var running = (stdout != '');
-						// Start or Stop before displaying the updated state.
-						command = "sudo /etc/init.d/pycam " + (running ? 'stop' : 'start');
-						exec(command, { timeout: 1000 }, showStatus);
+					var running = (stdout != '');
+					// Start or Stop before displaying the updated state.
+					command = "sudo /etc/init.d/pycam " + (running ? 'stop' : 'start');
+					exec(command, { timeout: 1000 }, showStatus);
 					});
 				}
 				else
