@@ -11,7 +11,7 @@ function onRequest(request, response)
   {
     // Display current status - running if pgrep returns non-empty string
     response.writeHead(200, {"Content-Type": "text/html"});
-    response.write('<html><body><h1>Picam</h1><h1 style = "color:');
+    response.write('<html><head><title>Picam Local Control</title></head><body style="font-size:10vw;"><h1>Picam</h1><h1 style = "color:');
   	exec("pgrep pycam.py", { timeout : 500 },
   		function (error, stdout, sterr) {
   			var running = (stdout != '');
