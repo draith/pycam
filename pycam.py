@@ -37,7 +37,7 @@ movieJustTaken = False
 saveWidth   = 1296
 saveHeight  = 972
 saveQuality = 15 # Set jpeg quality (0 to 100)
-shutterSpeed = 80000 # 80 ms to start
+shutterSpeed = 40000 # 40 ms to start
 # Test-Image settings
 testWidth = 130
 testHeight = 73
@@ -77,7 +77,7 @@ def captureTestImage(width, height, camera):
   buffer = im.load()
   imageData.close()
   return im, buffer
-    
+
 # Get available disk space
 def getFreeSpace():
     st = os.statvfs(filepath)
@@ -115,12 +115,12 @@ with picamera.PiCamera() as camera:
   camera.awb_mode = 'off'
   camera.awb_gains = (1.5, 1.2)
   camera.exposure_mode = 'sports'
-  camera.framerate = 2
+  camera.framerate = 8
   camera.shutter_speed = shutterSpeed
-  
+
   # Get first image
   image1, buffer1 = captureTestImage(testWidth, testHeight, camera)
-  
+
   while (True):
     # Get comparison image
     image2, buffer2 = captureTestImage(testWidth, testHeight, camera)
@@ -130,28 +130,28 @@ with picamera.PiCamera() as camera:
     brighterPixels = 0
     totalPixels = 0
     totalLevel = 0
-    
+
     # in debug mode, save a bitmap-file with marked changed pixels and with visible testarea-borders
-    if (debugMode): 
+    if (debugMode):
         debugimage = Image.new("RGB",(testWidth, testHeight))
         debugim = debugimage.load()
 
     # Scan test areas for changed pixels (motion) and mean light level.
-    for z in xrange(0, testAreaCount): 
-        for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]): 
+    for z in xrange(0, testAreaCount):
+        for x in xrange(testBorders[z][0][0]-1, testBorders[z][0][1]):
             for y in xrange(testBorders[z][1][0]-1, testBorders[z][1][1]):
                 if (debugMode):
                     debugim[x,y] = buffer2[x,y]
                     if ((x == testBorders[z][0][0]-1) or (x == testBorders[z][0][1]-1) or (y == testBorders[z][1][0]-1) or (y == testBorders[z][1][1]-1)):
                         debugim[x,y] = (0, 0, 255) # in debug mode, mark all border pixel to blue
-                
+
                 # Monitor exposure level
                 totalPixels += 1
                 totalLevel += buffer2[x,y][1]
-                
+
                 # Just check green channel as it's the highest quality channel
                 pixdiff = buffer1[x,y][1] - buffer2[x,y][1]
-                
+
                 if abs(pixdiff) > threshold:
                     changedPixels += 1
                     if pixdiff > 0:
@@ -204,7 +204,7 @@ with picamera.PiCamera() as camera:
           lastEmail = time.time()
         # Convert / encase in mp4, and upload.
         os.system("echo '{0}' >> /home/pi/pycam/converter.txt".format(filename))
-          
+
         keepDiskSpaceFree(diskSpaceToReserve)
         movieJustTaken = True
 
@@ -222,4 +222,3 @@ with picamera.PiCamera() as camera:
 
     # Shift comparison buffers
     image1, buffer1 = image2, buffer2
- 
