@@ -67,5 +67,5 @@ function onRequest(request, response)
 	}
 } // onRequest
 
-//http.createServer(onRequest).listen(8998);
-http.createServer(onRequest).listen(80);
+http.createServer(onRequest).listen(8998);
+//http.createServer(onRequest).listen(80);
