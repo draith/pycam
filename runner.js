@@ -12,8 +12,6 @@ const server = https.createServer({
 
 const wss = new WebSocket.Server({ server: server });
 
-console.log('Created WS Server');
-
 wss.on('connection', function connection(ws) {
 
 	function sendStatus() {
@@ -30,7 +28,7 @@ wss.on('connection', function connection(ws) {
 
 	console.log('Connection open');
 	sendStatus();
-  
+
 	ws.on('message', function incoming(msg) {
 		console.log('received: %s', msg);
 		commandObj = JSON.parse(msg);
@@ -49,7 +47,7 @@ wss.on('connection', function connection(ws) {
 					});
 			});
 			break;
-		
+
 		case 'Status':
 			sendStatus();
 			break;
