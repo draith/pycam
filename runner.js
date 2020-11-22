@@ -1,8 +1,18 @@
 // Runner: receive requests to run or stop pycam, and show current status.
 const WebSocket = require('ws');
 const child_process = require('child_process');
+const fs = require('fs');
+const https = require('https');
 const exec = child_process.exec;
-const wss = new WebSocket.Server({ port: 8998 });
+
+const server = https.createServer({
+	cert: fs.readFileSync('./self_cert.pem'),
+	key: fs.readFileSync('./self_key.pem')
+});
+
+const wss = new WebSocket.Server({ server: server });
+
+console.log('Created WS Server');
 
 wss.on('connection', function connection(ws) {
 
@@ -49,3 +59,5 @@ wss.on('connection', function connection(ws) {
 		};
 	}); // on 'message'
   }); // on 'connect'
+
+server.listen(8998);
