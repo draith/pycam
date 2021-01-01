@@ -1,101 +1,77 @@
 // Runner: receive requests to run or stop pycam, and show current status.
-const WebSocket = require('ws');
-const child_process = require('child_process');
-const fs = require('fs');
-const https = require('https');
-const exec = child_process.exec;
+var http = require("http");
+var fs = require("fs");
+var child_process = require('child_process');
+var exec = child_process.exec;
+var path = "/home/pi/pycam/";
+var lastNumber = parseInt(fs.readFileSync(path + 'lastNum.txt','utf8'),10);
 var NodeRSA = require('node-rsa');
-var key = new NodeRSA(fs.readFileSync('./key.pem','utf8'));
+var key = new NodeRSA(fs.readFileSync(path + 'key.pem','utf8'));
 
-const server = https.createServer({
-	cert: fs.readFileSync('./self_cert.pem'),
-	key: fs.readFileSync('./self_key.pem')
-});
-
-const wss = new WebSocket.Server({ server: server });
-
-wss.on('connection', function connection(ws) {
-
-	function sendStatus() {
-		exec("pgrep pycam.py", { timeout : 500 },
+function onRequest(request, response)
+{
+  console.log("Got request: " + request.url);
+	// Redirect to remote control page
+	function returnToControlPage(error, stdout, sterr)
+	{
+	exec("pgrep pycam.py", { timeout : 500 },
 		function (error, stdout, sterr) {
-			var running = (stdout != '');
-			ws.send(
-				JSON.stringify(
-				{ 'status'  : (running ? 'Running' : 'Stopped')
-				})
-			);
+			response.writeHead(302, {
+				'Location': 'https://www.mekeke.co.uk/picam/index.php'
+				// 'Location': 'https://192.168.0.109/pycam_php_control/index.php'
+				//add other headers here...
+			  });
+			  response.end();
 		});
 	}
 
-	console.log('Connection open');
-	sendStatus();
-	var sessionNumber = null;
+	// First, decrypt the encrypted command encoded in the url path
+	var encrypted = request.url.substring(1);
+	console.log("Request headers:");
 
-	ws.on('message', function incoming(encrypted)
+	const { headers } = request;
+
+	for (const [key, value] of Object.entries(headers)) {
+		console.log(`${key}: ${value}`);
+	}
+
+	try 
 	{
-		var msg = key.decrypt(encrypted, 'utf8');
-		console.log('received: %s', msg);
-		var splitPos = msg.indexOf('/');
-		if (splitPos < 1)
+		var decrypted = key.decrypt(encrypted, 'utf8');
+		// Then split into command and number
+		var components = decrypted.split('/');
+		if (components.length == 2)
 		{
-			console.log('Bad message - delimiter not found.');
-			return;
-		}
-
-		var newNumber = parseInt(msg.substring(0, splitPos));
-
-		if (isNaN(newNumber))
-		{
-			console.log('Bad message - no valid number.');
-			return;
-		}
-
-		var command = msg.substring(splitPos + 1);
-
-		if (!sessionNumber)
-		{
-			var lastNumber = parseInt(fs.readFileSync('./lastNum.txt','utf8'));
-			if (newNumber <= lastNumber)
+			command = components[1];
+      console.log("command = " + command);
+			if (command == "Start" || command == "Stop")
 			{
-				console.log('BAD NUMBER! ' + newNumber + ": should be > " + lastNumber);
-				return;
-			}
-			// Valid session number: save it.
-			sessionNumber = newNumber;
-			fs.writeFileSync("./lastNum.txt", newNumber.toString());
-		}
-		else if (newNumber != sessionNumber)
-		{
-			console.log('BAD NUMBER! ' + newNumber + ': should match session number ' + sessionNumber);
-			return;
-		}
-
-		switch (command)
-		{
-		case 'Start': 
-		case 'Stop':
-			console.log("Command = " + command);
-			exec("pgrep pycam.py", { timeout : 500 }, 
-				function (error, stdout, sterr) {
-				var running = (stdout != '');
-				// Start or Stop before displaying the updated state.
-				command = "sudo /etc/init.d/pycam " + command.toLowerCase();
-				exec(command, { timeout: 1000 }, 
+				var newNumber = parseInt(components[0],10);
+				// Check that newNumber > lastNumber : prevent repeat attacks
+				if (newNumber > lastNumber)
+				{
+					exec("pgrep pycam.py", { timeout : 500 }, 
 					function (error, stdout, sterr) {
-						sendStatus();
+						var running = (stdout != '');
+						if ((command == "Start") != running)
+						// Start or Stop before displaying the updated state.
+						command = "sudo /etc/init.d/pycam " + (command.toLowerCase());
+						exec(command, { timeout: 1000 }, returnToControlPage);
 					});
-			});
-			break;
 
-		case 'Status':
-			sendStatus();
-			break;
+					// Save new number
+					fs.writeFileSync(path + "lastNum.txt", newNumber.toString());
+					lastNumber = newNumber;
+				}
+			}
+		}
+	}
+	catch (err)
+	{
+		// key.decrypt will throw an error if an invalid command string is received.
+		// Catch this to protect us from DoS attacks.
+		console.log("Caught error: " + err.message);
+	}
+} // onRequest
 
-		default:
-			console.log('Unknown command %', msg);
-		};
-	}); // on 'message'
-}); // on 'connection'
-
-server.listen(8998);
+http.createServer(onRequest).listen(8998);
